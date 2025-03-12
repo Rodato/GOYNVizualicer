@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visualizador de Respuestas del Taller</title>
+  
+  <!-- Importar React y ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Importar Babel para JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Importar PapaParse para procesar CSV -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+  
+  <!-- Importar XLSX para archivos Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  
+  <!-- Importar Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Importar html2pdf.js para generar PDFs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              200: '#bae6fd',
+              300: '#7dd3fc',
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#0c4a6e',
+            },
+            secondary: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              200: '#99f6e4',
+              300: '#5eead4',
+              400: '#2dd4bf',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              800: '#115e59',
+              900: '#134e4a',
+            },
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          animation: {
+            'fade-in': 'fadeIn 0.3s ease-out',
+            'slide-up': 'slideUp 0.4s ease-out',
+          },
+          keyframes: {
+            fadeIn: {
+              '0%': { opacity: '0' },
+              '100%': { opacity: '1' },
+            },
+            slideUp: {
+              '0%': { transform: 'translateY(20px)', opacity: '0' },
+              '100%': { transform: 'translateY(0)', opacity: '1' },
+            },
+          },
+          boxShadow: {
+            'card': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            'card-hover': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+          },
+        }
+      }
+    }
+  </script>
+  
+  <!-- Importar Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <style>
+    /* Estilos adicionales para animaciones y mejoras visuales */
+    .card-transition {
+      transition: all 0.3s ease;
+    }
+    
+    .card-transition:hover {
+      transform: translateY(-5px);
+    }
+    
+    /* Scrollbar personalizado */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    
+    ::-webkit-scrollbar-track {
+      background: #f1f1f1;
+      border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb {
+      background: #c5c5c5;
+      border-radius: 10px;
+    }
+    
+    ::-webkit-scrollbar-thumb:hover {
+      background: #a8a8a8;
+    }
+    
+    /* Animación de carga */
+    .loader {
+      border-top-color: #0ea5e9;
+      animation: spinner 0.8s linear infinite;
+    }
+    
+    @keyframes spinner {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans">
+  <div id="root"></div>
+  
+  <script type="text/babel">
+    // Componente principal
+    const TypeformVisualizer = () => {
+      // Estados para almacenar datos y filtros
+      const [data, setData] = React.useState([]);
+      const [loading, setLoading] = React.useState(true);
+      const [error, setError] = React.useState(null);
+      const [grupos, setGrupos] = React.useState([]);
+      const [fechas, setFechas] = React.useState([]);
+      const [grupoSeleccionado, setGrupoSeleccionado] = React.useState('');
+      const [fechaSeleccionada, setFechaSeleccionada] = React.useState('');
+      const [respuestasFiltradas, setRespuestasFiltradas] = React.useState([]);
+      const [ultimaActualizacion, setUltimaActualizacion] = React.useState('');
+      const [darkMode, setDarkMode] = React.useState(false);
+      
+      // ID del formulario y configuración de exportación
+      const TYPEFORM_FORM_ID = 'EjMOnerN';
+      const exportUrl = `https://admin.typeform.com/form/${TYPEFORM_FORM_ID}/results/data`;
+
+      // Instrucciones de actualización
+      const obtenerInstrucciones = () => {
+        return `
+          <div class="space-y-4 text-left">
+            <p>Para actualizar los datos, sigue estos pasos:</p>
+            <ol class="list-decimal pl-5 space-y-2">
+              <li>Visita el panel de resultados de Typeform: 
+                <a href="${exportUrl}" target="_blank" class="text-blue-600 dark:text-blue-400 underline">
+                  ${exportUrl}
+                </a>
+              </li>
+              <li>Haz clic en "Exportar" y selecciona "CSV" o "Excel"</li>
+              <li>Descarga el archivo</li>
+              <li>Haz clic en "Cargar archivo" abajo y selecciona el archivo descargado</li>
+            </ol>
+          </div>
+        `;
+      };
+      
+      // Función para convertir la fecha de texto a formato estándar YYYY-MM-DD
+      const formatearFecha = (fechaTexto) => {
+        if (!fechaTexto) return '';
+        try {
+          const fecha = new Date(fechaTexto);
+          return fecha.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+        } catch (e) {
+          return fechaTexto; // Si hay error, devolver el texto original
+        }
+      };
+      
+      // Función para cargar datos desde un archivo (CSV o Excel)
+      const cargarDatosDesdeArchivo = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        setLoading(true);
+        
+        const fileExtension = file.name.split('.').pop().toLowerCase();
+        
+        if (fileExtension === 'csv') {
+          // Procesar como CSV
+          Papa.parse(file, {
+            header: true, // Primera fila como encabezados
+            skipEmptyLines: true,
+            dynamicTyping: true, // Convertir números automáticamente
+            encoding: "UTF-8",
+            complete: (results) => {
+              console.log("CSV parseado correctamente:", results);
+              if (results.data && results.data.length > 0) {
+                procesarDatosCSV(results.data);
+                
+                // Establecer la hora de última actualización
+                actualizarHora();
+                
+                setError(null); // Limpiar errores previos
+              } else {
+                setError("El archivo CSV no contiene datos válidos");
+                setLoading(false);
+              }
+            },
+            error: (error) => {
+              console.error("Error al procesar el archivo CSV:", error);
+              setError(`Error al procesar el archivo CSV: ${error.message}`);
+              setLoading(false);
+            }
+          });
+        } else if (['xlsx', 'xls'].includes(fileExtension)) {
+          // Procesar como Excel
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const data = new Uint8Array(e.target.result);
+              const workbook = XLSX.read(data, { type: 'array' });
+              
+              // Obtener la primera hoja
+              const firstSheet = workbook.SheetNames[0];
+              const worksheet = workbook.Sheets[firstSheet];
+              
+              // Convertir a JSON
+              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+              
+              console.log("Excel parseado correctamente:", jsonData);
+              
+              if (jsonData && jsonData.length > 0) {
+                procesarDatosCSV(jsonData);
+                
+                // Establecer la hora de última actualización
+                actualizarHora();
+                
+                setError(null); // Limpiar errores previos
+              } else {
+                setError("El archivo Excel no contiene datos válidos");
+                setLoading(false);
+              }
+            } catch (error) {
+              console.error("Error al procesar el archivo Excel:", error);
+              setError(`Error al procesar el archivo Excel: ${error.message}`);
+              setLoading(false);
+            }
+          };
+          reader.onerror = (error) => {
+            console.error("Error al leer el archivo:", error);
+            setError(`Error al leer el archivo: ${error.message}`);
+            setLoading(false);
+          };
+          reader.readAsArrayBuffer(file);
+        } else {
+          setError(`Formato de archivo no soportado: ${fileExtension}. Por favor, usa CSV o Excel.`);
+          setLoading(false);
+        }
+      };
+      
+      // Función para actualizar la hora
+      const actualizarHora = () => {
+        const ahora = new Date();
+        setUltimaActualizacion(
+          `${ahora.getHours().toString().padStart(2, '0')}:${ahora.getMinutes().toString().padStart(2, '0')}:${ahora.getSeconds().toString().padStart(2, '0')}`
+        );
+      };
+
+      // Función para procesar los datos del CSV o Excel
+      const procesarDatosCSV = (csvData) => {
+        try {
+          console.log("Procesando datos:", csvData.slice(0, 2)); // Muestra las primeras 2 filas para debug
+          
+          // Verificar que tenemos datos
+          if (!Array.isArray(csvData) || csvData.length === 0) {
+            throw new Error("No se encontraron datos en el archivo");
+          }
+          
+          // Obtener todas las claves para verificar estructura
+          const todasLasClaves = new Set();
+          csvData.forEach(row => {
+            Object.keys(row).forEach(key => {
+              todasLasClaves.add(key);
+            });
+          });
+          console.log("Columnas encontradas:", Array.from(todasLasClaves));
+
+          // Procesar cada fila del CSV
+          const datosLimpios = csvData.map(row => {
+            // Buscar la columna que contenga la palabra "grupo" para identificar el grupo
+            const grupoKey = Object.keys(row).find(
+              key => key && 
+              typeof key === 'string' && 
+              key.toLowerCase().includes('grupo')
+            );
+            
+            // Buscar la columna de fecha de envío
+            const fechaKey = Object.keys(row).find(
+              key => key && 
+              typeof key === 'string' && 
+              (key.includes('Submitted At') || key.includes('Timestamp'))
+            );
+            
+            const fechaEnvio = row[fechaKey] || '';
+            
+            // Objeto para almacenar datos procesados
+            const respuesta = {
+              grupo: grupoKey ? (row[grupoKey] || '') : '',
+              fecha: formatearFecha(fechaEnvio),
+              tarjetaLupa: '',
+              respuestaTarjeta: '',
+              casoExito: '',
+              factoresExito: '',
+              factor1: '',
+              factor2: '',
+              factor3: '',
+              amigo1: '',
+              amigo2: '',
+              familiar1: '',
+              familiar2: '',
+              aliadx1: '',
+              aliadx2: '',
+              mensajes: [],
+              lugares: [],
+              simbolos: [],
+              dichos: [],
+              canales: [],
+              nombrePersonaje: '',
+              frases: []
+            };
+            
+            // Recorrer todas las columnas para identificar los datos
+            Object.entries(row).forEach(([key, value]) => {
+              if (!key || !value) return;
+              
+              const keyLower = key.toLowerCase();
+              
+              // Buscar la columna que contenga referencias a la tarjeta lupa
+              if (keyLower.includes('tarjeta lupa') && !keyLower.includes('respuesta')) {
+                // Aquí eliminamos el texto introductorio del título de la pregunta
+                let preguntaLimpia = value;
+                
+                const preguntaIntro = "Bienvenidx al inicio de este rally. En esta primera parada, exploraremos preguntas clave que nos ayudarán a entender mejor el camino que vamos a recorrer juntxs.\n\nElige la pregunta de tu tarjeta lupa:";
+                
+                if (typeof value === 'string' && value.includes(preguntaIntro)) {
+                  preguntaLimpia = value.replace(preguntaIntro, "").trim();
+                }
+                
+                respuesta.tarjetaLupa = preguntaLimpia;
+              } else if (keyLower.includes('respuesta') && keyLower.includes('tarjeta lupa')) {
+                // Eliminar el texto introductorio de la respuesta
+                let respuestaLimpia = value;
+                
+                const respuestaIntro = "¿Cuál es tu respuesta a la tarjeta lupa seleccionada?";
+                
+                if (typeof value === 'string' && value.includes(respuestaIntro)) {
+                  respuestaLimpia = value.replace(respuestaIntro, "").trim();
+                }
+                
+                respuesta.respuestaTarjeta = respuestaLimpia;
+              } else if (keyLower.includes('caso de éxito') || keyLower.includes('caso de exito')) {
+                // Limpiar texto introductorio del caso de éxito
+                let casoLimpio = value;
+                
+                const casoIntro = "Aquí exploraremos casos de éxito y reflexionaremos sobre los factores que han permitido que ciertos proyectos prosperen.\n\nElige el caso de éxito que estás analizando:";
+                
+                if (typeof value === 'string' && value.includes(casoIntro)) {
+                  casoLimpio = value.replace(casoIntro, "").trim();
+                }
+                
+                respuesta.casoExito = casoLimpio;
+              } else if ((keyLower.includes('factores de éxito') || keyLower.includes('factores de exito')) && !keyLower.includes('factor 1')) {
+                // Limpiar texto introductorio de factores de éxito
+                let factoresLimpios = value;
+                
+                const factoresIntro = "En equipo, seleccionen los factores de éxito que identificaron en el caso.";
+                
+                if (typeof value === 'string' && value.includes(factoresIntro)) {
+                  factoresLimpios = value.replace(factoresIntro, "").trim();
+                }
+                
+                respuesta.factoresExito = factoresLimpios;
+              } else if (keyLower.includes('factor 1')) {
+                respuesta.factor1 = value;
+              } else if (keyLower.includes('factor 2')) {
+                respuesta.factor2 = value;
+              } else if (keyLower.includes('factor 3')) {
+                respuesta.factor3 = value;
+              } else if (keyLower.includes('amigo 1')) {
+                respuesta.amigo1 = value;
+              } else if (keyLower.includes('amigo 2')) {
+                respuesta.amigo2 = value;
+              } else if (keyLower.includes('familiar 1')) {
+                respuesta.familiar1 = value;
+              } else if (keyLower.includes('familiar 2')) {
+                respuesta.familiar2 = value;
+              } else if (keyLower.includes('aliadx 1')) {
+                respuesta.aliadx1 = value;
+              } else if (keyLower.includes('aliadx 2')) {
+                respuesta.aliadx2 = value;
+              } else if (keyLower.includes('mensaje') && value) {
+                respuesta.mensajes.push(value);
+              } else if (keyLower.includes('lugar') && value) {
+                respuesta.lugares.push(value);
+              } else if ((keyLower.includes('símbolo') || keyLower.includes('simbolo')) && value) {
+                respuesta.simbolos.push(value);
+              } else if (keyLower.includes('dicho') && value) {
+                respuesta.dichos.push(value);
+              } else if ((keyLower.includes('canal') || keyLower.includes('herramienta')) && value) {
+                respuesta.canales.push(value);
+              } else if (keyLower.includes('personaje')) {
+                respuesta.nombrePersonaje = value;
+              } else if (keyLower.includes('frase') && value) {
+                respuesta.frases.push(value);
+              }
+            });
+            
+            return respuesta;
+          });
+          
+          // Filtrar datos vacíos o inválidos
+          const datosFiltrados = datosLimpios.filter(item => item.grupo && item.fecha);
+          
+          console.log("Datos procesados:", datosFiltrados.length, "filas válidas");
+          
+          if (datosFiltrados.length === 0) {
+            throw new Error("No se encontraron datos válidos después del procesamiento. Verifica que el archivo tenga el formato correcto.");
+          }
+          
+          // Ordenar por fecha más reciente
+          datosFiltrados.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+          
+          // Guardar datos y extraer valores para filtros
+          setData(datosFiltrados);
+          
+          const gruposUnicos = [...new Set(datosFiltrados.map(d => d.grupo))].filter(Boolean);
+          const fechasUnicas = [...new Set(datosFiltrados.map(d => d.fecha))].filter(Boolean);
+          
+          // Ordenar fechas cronológicamente
+          fechasUnicas.sort((a, b) => new Date(b) - new Date(a));
+          
+          setGrupos(gruposUnicos);
+          setFechas(fechasUnicas);
+          
+          // Si solo hay un grupo y una fecha, seleccionarlos automáticamente
+          if (gruposUnicos.length === 1 && !grupoSeleccionado) setGrupoSeleccionado(gruposUnicos[0]);
+          if (fechasUnicas.length === 1 && !fechaSeleccionada) setFechaSeleccionada(fechasUnicas[0]);
+          
+          setLoading(false);
+        } catch (error) {
+          console.error("Error al procesar los datos:", error);
+          setError(`Error al procesar los datos: ${error.message}`);
+          setLoading(false);
+        }
+      };
+      
+      // Cargar datos de ejemplo al iniciar (solo para demostración)
+      React.useEffect(() => {
+        // Datos de ejemplo para mostrar la estructura de la interfaz
+        const datosEjemplo = [
+          {
+            grupo: "Grupo Creatividad",
+            fecha: "2025-03-11",
+            tarjetaLupa: "¿Qué desafíos queremos superar?",
+            respuestaTarjeta: "Queremos superar los desafíos de comunicación y coordinación.",
+            casoExito: "Caso emprendimiento local",
+            factoresExito: "Comunicación, Planificación",
+            factor1: "Buena comunicación entre todos los miembros",
+            factor2: "Planificación detallada de cada etapa",
+            factor3: "Seguimiento constante",
+            amigo1: "Juan Pérez",
+            amigo2: "María López",
+            familiar1: "Padre",
+            familiar2: "Hermana",
+            aliadx1: "Profesor de la universidad",
+            aliadx2: "Mentor de la empresa",
+            mensajes: ["La perseverancia es clave", "Nunca desistas de tus sueños"],
+            lugares: ["Plaza central", "Biblioteca"],
+            simbolos: ["Estrella ascendente", "Árbol frondoso"],
+            dichos: ["El que persevera, alcanza", "Más vale paso firme que carrera"],
+            canales: ["Instagram", "WhatsApp"],
+            nombrePersonaje: "Esperanza",
+            frases: ["Siempre hay un nuevo camino", "La creatividad abre puertas"]
+          },
+          {
+            grupo: "Grupo Innovación",
+            fecha: "2025-03-12",
+            tarjetaLupa: "¿Cómo podemos crear valor?",
+            respuestaTarjeta: "Identificando necesidades no satisfechas en la comunidad.",
+            casoExito: "Tecnología para todos",
+            factoresExito: "Innovación, Inclusión, Accesibilidad",
+            factor1: "Identificación de problemas reales",
+            factor2: "Soluciones accesibles económicamente",
+            factor3: "Colaboración multidisciplinaria",
+            amigo1: "Carlos Ramírez",
+            amigo2: "Daniela Torres",
+            familiar1: "Tío",
+            familiar2: "Abuelo",
+            aliadx1: "ONG local",
+            aliadx2: "Empresario exitoso",
+            mensajes: ["La innovación comienza por escuchar", "Las soluciones simples son las mejores"],
+            lugares: ["Centro comunitario", "Parque tecnológico"],
+            simbolos: ["Foco encendido", "Puente"],
+            dichos: ["Si no existe, créalo", "Donde hay un problema, hay una oportunidad"],
+            canales: ["YouTube", "Meetups locales"],
+            nombrePersonaje: "Inventiva",
+            frases: ["Transformando ideas en realidades", "La comunidad es el centro"]
+          }
+        ];
+        
+        setData(datosEjemplo);
+        setGrupos(["Grupo Creatividad", "Grupo Innovación"]);
+        setFechas(["2025-03-12", "2025-03-11"]);
+        setLoading(false);
+        
+        // Establecer hora de ejemplo
+        actualizarHora();
+      }, []);
+      
+      // Filtrar respuestas cuando cambian los filtros
+      React.useEffect(() => {
+        if (data.length > 0) {
+          let resultados = [...data];
+          
+          if (grupoSeleccionado) {
+            resultados = resultados.filter(item => item.grupo === grupoSeleccionado);
+          }
+          
+          if (fechaSeleccionada) {
+            resultados = resultados.filter(item => item.fecha === fechaSeleccionada);
+          }
+          
+          setRespuestasFiltradas(resultados);
+        }
+      }, [data, grupoSeleccionado, fechaSeleccionada]);
+      
+      // Función para cambiar entre modo oscuro y claro
+      const toggleDarkMode = () => {
+        setDarkMode(!darkMode);
+        document.documentElement.classList.toggle('dark');
+      };
+      
+      // Función para generar PDF
+      const generarPDF = (tipo, indice) => {
+        // Configuración para html2pdf
+        const opt = {
+          margin: [10, 10],
+          filename: tipo === 'todas' ? 
+            `respuestas-taller-${fechaSeleccionada || 'todas'}-${grupoSeleccionado || 'todos'}.pdf` : 
+            `respuesta-${respuestasFiltradas[indice].grupo}-${respuestasFiltradas[indice].fecha}.pdf`,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { 
+            scale: 2,
+            useCORS: true,
+            logging: false
+          },
+          jsPDF: { 
+            unit: 'mm', 
+            format: 'a4', 
+            orientation: 'portrait' 
+          },
+          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        };
+        
+        // Mostrar indicador de generación
+        setLoading(true);
+        
+        setTimeout(() => {
+          try {
+            // Seleccionar el contenido a convertir
+            let elemento;
+            
+            if (tipo === 'todas') {
+              // Descargar todas las respuestas
+              elemento = document.getElementById('todas-respuestas');
+            } else {
+              // Descargar una respuesta individual
+              elemento = document.getElementById(`respuesta-${indice}`);
+            }
+            
+            // Aplicar estilos de impresión temporalmente
+            const elementosOcultar = elemento.querySelectorAll('.no-imprimir');
+            elementosOcultar.forEach(el => {
+              el.style.display = 'none';
+            });
+            
+            // Crear PDF
+            html2pdf()
+              .set(opt)
+              .from(elemento)
+              .save()
+              .then(() => {
+                // Restaurar estilos después de generar el PDF
+                elementosOcultar.forEach(el => {
+                  el.style.display = '';
+                });
+                setLoading(false);
+              });
+          } catch (error) {
+            console.error('Error al generar PDF:', error);
+            alert('Hubo un error al generar el PDF. Por favor, intenta de nuevo.');
+            setLoading(false);
+          }
+        }, 100);
+      };
+      
+      // Renderizar mensaje de carga o de generación de PDF
+      if (loading) {
+        let mensaje = "Cargando datos...";
+        let descripcion = "Por favor espera mientras procesamos la información.";
+        
+        if (data.length > 0) {
+          mensaje = "Generando PDF...";
+          descripcion = "Por favor espera mientras se genera el documento.";
+        }
+        return (
+          <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
+            <div className="p-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg text-center animate-fade-in">
+              <div className="w-16 h-16 border-4 border-gray-200 border-solid rounded-full loader mx-auto mb-6"></div>
+              <h1 className="text-2xl font-bold text-primary-600 dark:text-primary-400 mb-4">{mensaje}</h1>
+              <p className="text-gray-600 dark:text-gray-300">{descripcion}</p>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className={`min-h-screen p-4 ${darkMode ? 'dark bg-gray-900 text-white' : 'bg-gray-50 text-gray-800'} transition-colors duration-300`}>
+          <div className="max-w-6xl mx-auto">
+            {/* Cabecera con botón de modo oscuro */}
+            <header className="mb-8 text-center relative">
+              <div className="absolute right-2 top-2">
+                <button 
+                  onClick={toggleDarkMode} 
+                  className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors no-imprimir"
+                  aria-label={darkMode ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+                >
+                  {darkMode ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-yellow-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            
+              <div className="animate-fade-in">
+                <h1 className="text-4xl font-bold text-primary-700 dark:text-primary-300 mb-3">Visualizador de Respuestas del Taller</h1>
+                <p className="text-gray-600 dark:text-gray-300 mb-4 max-w-2xl mx-auto">Explora las respuestas del formulario filtradas por fecha y grupo para tener una visión detallada de los resultados.</p>
+              </div>
+              
+              {/* Sección de actualización de datos */}
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-6 animate-slide-up">
+                <div className="mb-4" dangerouslySetInnerHTML={{ __html: obtenerInstrucciones() }}></div>
+                <div className="flex flex-wrap justify-center items-center gap-4">
+                  <label className="px-5 py-3 bg-primary-500 hover:bg-primary-600 text-white rounded-md cursor-pointer transition-colors shadow-sm flex items-center space-x-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <span>Cargar archivo</span>
+                    <input 
+                      type="file" 
+                      accept=".csv,.xlsx,.xls" 
+                      onChange={cargarDatosDesdeArchivo} 
+                      className="hidden"
+                    />
+                  </label>
+                  <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Última actualización: {ultimaActualizacion}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Mostrar mensajes de error */}
+              {error && (
+                <div className="bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-200 px-4 py-3 rounded mb-6 animate-fade-in">
+                  <div className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p>{error}</p>
+                  </div>
+                </div>
+              )}
+            </header>
+            
+            {/* Filtros */}
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-8 animate-slide-up">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Fecha:</label>
+                  <div className="relative">
+                    <select 
+                      className="w-full p-3 pr-10 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 dark:text-white"
+                      value={fechaSeleccionada}
+                      onChange={(e) => setFechaSeleccionada(e.target.value)}
+                    >
+                      <option value="">Todas las fechas</option>
+                      {fechas.map((fecha, idx) => (
+                        <option key={idx} value={fecha}>{fecha}</option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Grupo:</label>
+                  <div className="relative">
+                    <select 
+                      className="w-full p-3 pr-10 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-md shadow-sm focus:ring-primary-500 focus:border-primary-500 dark:text-white"
+                      value={grupoSeleccionado}
+                      onChange={(e) => setGrupoSeleccionado(e.target.value)}
+                    >
+                      <option value="">Todos los grupos</option>
+                      {grupos.map((grupo, idx) => (
+                        <option key={idx} value={grupo}>{grupo}</option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Contador de resultados */}
+            <div className="mb-6 text-center animate-fade-in">
+              <div className="flex flex-wrap justify-center items-center gap-4">
+                <div className="inline-flex items-center px-4 py-2 bg-primary-100 dark:bg-primary-900 text-primary-800 dark:text-primary-200 rounded-full">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <p className="font-medium">
+                    Mostrando {respuestasFiltradas.length} respuestas {grupoSeleccionado ? `del ${grupoSeleccionado}` : ''}
+                    {fechaSeleccionada ? ` para la fecha ${fechaSeleccionada}` : ''}
+                  </p>
+                </div>
+                
+                {respuestasFiltradas.length > 0 && (
+                  <button 
+                    onClick={() => generarPDF('todas')}
+                    className="inline-flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors shadow-sm"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                    </svg>
+                    Descargar todas en PDF
+                  </button>
+                )}
+              </div>
+            </div>
+            
+            {/* Resultados */}
+            {respuestasFiltradas.length > 0 ? (
+              <div id="todas-respuestas" className="grid grid-cols-1 gap-8 mb-12">
+                {respuestasFiltradas.map((respuesta, index) => (
+                  <div 
+                    id={`respuesta-${index}`} 
+                    key={index} 
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-card hover:shadow-card-hover card-transition overflow-hidden animate-slide-up" 
+                    style={{animationDelay: `${index * 0.1}s`}}
+                  >
+                    <div className="border-b border-gray-200 dark:border-gray-700 p-6 flex flex-wrap justify-between items-center bg-gradient-to-r from-primary-50 to-white dark:from-primary-900 dark:to-gray-800">
+                      <h2 className="text-2xl font-bold text-primary-700 dark:text-primary-300 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        {respuesta.grupo}
+                      </h2>
+                      <div className="flex items-center space-x-3">
+                        <span className="bg-primary-100 dark:bg-primary-800 text-primary-800 dark:text-primary-200 px-4 py-2 rounded-full text-sm font-medium flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          {respuesta.fecha}
+                        </span>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            generarPDF('individual', index);
+                          }}
+                          className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors text-sm shadow-sm"
+                          title="Descargar en PDF"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                          </svg>
+                          PDF
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="p-6 space-y-8">
+                      {/* Sección de Tarjeta Lupa eliminada */}
+                      
+                      <div className="space-y-4">
+                        <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          Caso de Éxito
+                        </h3>
+                        <div className="bg-green-50 dark:bg-green-900/30 p-5 rounded-lg">
+                          <p className="font-medium mb-3 text-green-800 dark:text-green-300">Caso seleccionado: {respuesta.casoExito}</p>
+                          <p className="font-medium mb-3 text-green-800 dark:text-green-300">Factores de éxito identificados: {respuesta.factoresExito}</p>
+                          {respuesta.factor1 && (
+                            <div className="ml-4 mt-3 space-y-2">
+                              <p className="flex items-start"><span className="font-medium text-green-700 dark:text-green-400 mr-2">•</span> {respuesta.factor1}</p>
+                              {respuesta.factor2 && <p className="flex items-start"><span className="font-medium text-green-700 dark:text-green-400 mr-2">•</span> {respuesta.factor2}</p>}
+                              {respuesta.factor3 && <p className="flex items-start"><span className="font-medium text-green-700 dark:text-green-400 mr-2">•</span> {respuesta.factor3}</p>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {(respuesta.amigo1 || respuesta.familiar1 || respuesta.aliadx1) && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                            </svg>
+                            Red de Apoyo
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                            <div className="bg-yellow-50 dark:bg-yellow-900/30 p-5 rounded-lg">
+                              <h4 className="font-medium mb-3 text-yellow-800 dark:text-yellow-300 flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                </svg>
+                                Amigos
+                              </h4>
+                              <ul className="list-disc ml-5 space-y-1">
+                                {respuesta.amigo1 && <li className="text-yellow-900 dark:text-yellow-200">{respuesta.amigo1}</li>}
+                                {respuesta.amigo2 && <li className="text-yellow-900 dark:text-yellow-200">{respuesta.amigo2}</li>}
+                              </ul>
+                            </div>
+                            <div className="bg-red-50 dark:bg-red-900/30 p-5 rounded-lg">
+                              <h4 className="font-medium mb-3 text-red-800 dark:text-red-300 flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                </svg>
+                                Familiares
+                              </h4>
+                              <ul className="list-disc ml-5 space-y-1">
+                                {respuesta.familiar1 && <li className="text-red-900 dark:text-red-200">{respuesta.familiar1}</li>}
+                                {respuesta.familiar2 && <li className="text-red-900 dark:text-red-200">{respuesta.familiar2}</li>}
+                              </ul>
+                            </div>
+                            <div className="bg-purple-50 dark:bg-purple-900/30 p-5 rounded-lg">
+                              <h4 className="font-medium mb-3 text-purple-800 dark:text-purple-300 flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                                </svg>
+                                Aliados
+                              </h4>
+                              <ul className="list-disc ml-5 space-y-1">
+                                {respuesta.aliadx1 && <li className="text-purple-900 dark:text-purple-200">{respuesta.aliadx1}</li>}
+                                {respuesta.aliadx2 && <li className="text-purple-900 dark:text-purple-200">{respuesta.aliadx2}</li>}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.mensajes && respuesta.mensajes.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                            </svg>
+                            Mensajes
+                          </h3>
+                          <div className="bg-indigo-50 dark:bg-indigo-900/30 p-5 rounded-lg">
+                            <ul className="space-y-2">
+                              {respuesta.mensajes.map((mensaje, idx) => (
+                                mensaje && (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="text-indigo-500 mr-2">•</span>
+                                    <span className="text-indigo-900 dark:text-indigo-200">{mensaje}</span>
+                                  </li>
+                                )
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.lugares && respuesta.lugares.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            Lugares
+                          </h3>
+                          <div className="bg-gray-100 dark:bg-gray-700 p-5 rounded-lg">
+                            <ul className="space-y-2">
+                              {respuesta.lugares.map((lugar, idx) => (
+                                lugar && (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="text-gray-500 dark:text-gray-400 mr-2">•</span>
+                                    <span className="text-gray-800 dark:text-gray-200">{lugar}</span>
+                                  </li>
+                                )
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.simbolos && respuesta.simbolos.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                            </svg>
+                            Símbolos
+                          </h3>
+                          <div className="bg-pink-50 dark:bg-pink-900/30 p-5 rounded-lg">
+                            <ul className="space-y-2">
+                              {respuesta.simbolos.map((simbolo, idx) => (
+                                simbolo && (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="text-pink-500 mr-2">•</span>
+                                    <span className="text-pink-900 dark:text-pink-200">{simbolo}</span>
+                                  </li>
+                                )
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.dichos && respuesta.dichos.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                            </svg>
+                            Dichos
+                          </h3>
+                          <div className="bg-teal-50 dark:bg-teal-900/30 p-5 rounded-lg">
+                            <ul className="space-y-2">
+                              {respuesta.dichos.map((dicho, idx) => (
+                                dicho && (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="text-teal-500 mr-2">•</span>
+                                    <span className="text-teal-900 dark:text-teal-200">{dicho}</span>
+                                  </li>
+                                )
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.canales && respuesta.canales.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                            </svg>
+                            Canales/Herramientas
+                          </h3>
+                          <div className="bg-orange-50 dark:bg-orange-900/30 p-5 rounded-lg">
+                            <ul className="space-y-2">
+                              {respuesta.canales.map((canal, idx) => (
+                                canal && (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="text-orange-500 mr-2">•</span>
+                                    <span className="text-orange-900 dark:text-orange-200">{canal}</span>
+                                  </li>
+                                )
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.nombrePersonaje && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            Personaje
+                          </h3>
+                          <div className="bg-cyan-50 dark:bg-cyan-900/30 p-5 rounded-lg">
+                            <p className="flex items-center text-cyan-900 dark:text-cyan-200">
+                              <span className="font-medium text-cyan-700 dark:text-cyan-400 mr-2">Nombre:</span>
+                              {respuesta.nombrePersonaje}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {respuesta.frases && respuesta.frases.length > 0 && (
+                        <div className="space-y-4">
+                          <h3 className="text-xl font-semibold text-gray-800 dark:text-gray-200 flex items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2 text-lime-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            Frases
+                          </h3>
+                          <div className="bg-lime-50 dark:bg-lime-900/30 p-5 rounded-lg">
+                            <ul className="space-y-2">
+                              {respuesta.frases.map((frase, idx) => (
+                                frase && (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="text-lime-500 mr-2">•</span>
+                                    <span className="text-lime-900 dark:text-lime-200">"{frase}"</span>
+                                  </li>
+                                )
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md text-center animate-fade-in">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mx-auto text-gray-400 dark:text-gray-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <h2 className="text-xl font-bold text-gray-700 dark:text-gray-300 mb-4">No hay resultados</h2>
+                <p className="text-gray-600 dark:text-gray-400 max-w-lg mx-auto">
+                  No se encontraron respuestas con los filtros seleccionados. Intenta cambiar los criterios de búsqueda o cargar un nuevo archivo.
+                </p>
+              </div>
+            )}
+            
+            {/* Footer */}
+            <footer className="text-center text-gray-500 dark:text-gray-400 text-sm mt-8 pb-6">
+              Visualizador de Respuestas del Taller © {new Date().getFullYear()}
+            </footer>
+          </div>
+        </div>
+      );
+    };
+
+    // Renderizar la aplicación
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<TypeformVisualizer />);
+  </script>
+</body>
+</html>
